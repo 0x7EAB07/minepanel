@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ServerManagementController } from './server-management.controller';
 import { ServerManagementService } from './server-management.service';
@@ -9,7 +10,7 @@ import { ProxyModule } from 'src/proxy/proxy.module';
 import { Settings } from 'src/users/entities/settings.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Settings]), DiscordModule, UsersModule, ProxyModule],
+  imports: [TypeOrmModule.forFeature([Settings]), DiscordModule, UsersModule, ProxyModule, ConfigModule],
   controllers: [ServerManagementController],
   providers: [ServerManagementService, DockerComposeService],
 })

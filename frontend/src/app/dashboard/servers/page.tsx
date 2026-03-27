@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Loader2, Trash2, Settings as SettingsIcon, Zap, LayoutTemplate, Check, Coffee, Smartphone } from "lucide-react";
-import { fetchServerList, createServer, getAllServersStatus, deleteServer } from "@/services/docker/fetchs";
+import { Plus, Loader2, Trash2, Settings as SettingsIcon, Zap, LayoutTemplate, Check, Coffee, Smartphone, Upload, RefreshCw } from "lucide-react";
+import { fetchServerList, createServer, createServerFromBackup, getAllServersStatus, deleteServer } from "@/services/docker/fetchs";
 import { mcToast } from "@/lib/utils/minecraft-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,8 @@ import { useServersStore } from "@/lib/store/servers-store";
 import { serverTemplates, ServerTemplate } from "@/lib/server-templates";
 import { ServerEdition } from "@/lib/types/types";
 import { TranslationKey } from "@/lib/translations";
+import { useMinecraftVersions } from "@/lib/hooks/useMinecraftVersions";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type ServerInfo = {
   id: string;
@@ -38,9 +40,12 @@ export default function Dashboard() {
   const [isCreatingServer, setIsCreatingServer] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeletingServer, setIsDeletingServer] = useState<string | null>(null);
-  const [createMode, setCreateMode] = useState<"quick" | "template">("quick");
+  const [createMode, setCreateMode] = useState<"quick" | "template" | "backup">("quick");
   const [selectedTemplate, setSelectedTemplate] = useState<ServerTemplate | null>(null);
   const [selectedEdition, setSelectedEdition] = useState<ServerEdition>("JAVA");
+  const [backupFile, setBackupFile] = useState<File | null>(null);
+  const [backupVersion, setBackupVersion] = useState("latest");
+  const { versions: mcVersions, loading: versionsLoading, latestRelease, refresh: refreshVersions } = useMinecraftVersions({ filterType: "release", limit: 30 });
 
   const form = useForm<{ id: string }>({
     defaultValues: {
@@ -155,20 +160,29 @@ export default function Dashboard() {
   const handleCreateServer = async (values: { id: string }) => {
     setIsCreatingServer(true);
     try {
-      const baseConfig = {
-        id: values.id,
-        edition: selectedEdition,
-        port: selectedEdition === "BEDROCK" ? "19132" : "25565",
-        enableRcon: selectedEdition !== "BEDROCK",
-        minecraftVersion: selectedEdition === "BEDROCK" ? "LATEST" : "latest",
-      };
-      const serverData = selectedTemplate ? { ...baseConfig, ...selectedTemplate.config } : baseConfig;
-      const response = await createServer(serverData);
+      let response: { success: boolean; message: string };
+
+      if (createMode === "backup" && backupFile) {
+        response = await createServerFromBackup(values.id, selectedEdition, backupFile, backupVersion);
+      } else {
+        const baseConfig = {
+          id: values.id,
+          edition: selectedEdition,
+          port: selectedEdition === "BEDROCK" ? "19132" : "25565",
+          enableRcon: selectedEdition !== "BEDROCK",
+          minecraftVersion: selectedEdition === "BEDROCK" ? "LATEST" : "latest",
+        };
+        const serverData = selectedTemplate ? { ...baseConfig, ...selectedTemplate.config } : baseConfig;
+        response = await createServer(serverData);
+      }
+
       if (response.success) {
         mcToast.success(`${t("serverCreatedSuccess")} "${values.id}"`);
         setIsDialogOpen(false);
         form.reset();
         setSelectedTemplate(null);
+        setBackupFile(null);
+        setBackupVersion("latest");
         setCreateMode("quick");
         await new Promise((resolve) => setTimeout(resolve, 1000));
         await fetchServersFromBackend();
@@ -219,6 +233,8 @@ export default function Dashboard() {
             setIsDialogOpen(open);
             if (!open) {
               setSelectedTemplate(null);
+              setBackupFile(null);
+              setBackupVersion("latest");
               setCreateMode("quick");
               setSelectedEdition("JAVA");
             }
@@ -253,6 +269,18 @@ export default function Dashboard() {
               <Button type="button" variant={createMode === "template" ? "default" : "ghost"} size="sm" onClick={() => setCreateMode("template")} className={createMode === "template" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "text-gray-400 hover:text-white hover:bg-gray-700/50"}>
                 <LayoutTemplate className="h-4 w-4 mr-1" /> {t("fromTemplate")}
               </Button>
+              <Button
+                type="button"
+                variant={createMode === "backup" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => {
+                  setCreateMode("backup");
+                  setSelectedTemplate(null);
+                }}
+                className={createMode === "backup" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "text-gray-400 hover:text-white hover:bg-gray-700/50"}
+              >
+                <Upload className="h-4 w-4 mr-1" /> {t("fromBackup")}
+              </Button>
             </div>
 
             <Form {...form}>
@@ -283,6 +311,86 @@ export default function Dashboard() {
                           </div>
                         </button>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {createMode === "backup" && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-400">{t("fromBackupDesc")}</p>
+                    <div
+                      className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                        backupFile ? "border-emerald-500 bg-emerald-900/20" : "border-gray-600 hover:border-gray-500"
+                      }`}
+                    >
+                      <input
+                        type="file"
+                        accept=".tar.gz,.gz"
+                        onChange={(e) => setBackupFile(e.target.files?.[0] || null)}
+                        className="hidden"
+                        id="backup-file-input"
+                      />
+                      <label htmlFor="backup-file-input" className="cursor-pointer">
+                        {backupFile ? (
+                          <div>
+                            <Upload className="h-8 w-8 mx-auto mb-2 text-emerald-400" />
+                            <p className="text-sm text-emerald-400 font-minecraft">{backupFile.name}</p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {(backupFile.size / 1024 / 1024).toFixed(1)} MB
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <Upload className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                            <p className="text-sm text-gray-300">{t("backupUploadDropzone")}</p>
+                            <p className="text-xs text-gray-500 mt-1">{t("backupUploadFormats")}</p>
+                          </div>
+                        )}
+                      </label>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-gray-200">
+                          {t("minecraftVersion")}
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 p-0 bg-transparent hover:bg-emerald-700/30"
+                          onClick={() => refreshVersions()}
+                          disabled={versionsLoading}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 text-emerald-400 ${versionsLoading ? "animate-spin" : ""}`} />
+                        </Button>
+                      </div>
+                      <Select
+                        value={backupVersion}
+                        onValueChange={(value) => setBackupVersion(value)}
+                        disabled={versionsLoading}
+                      >
+                        <SelectTrigger className="bg-gray-800/70 border-gray-700/50 focus:border-emerald-500/50 focus:ring-emerald-500/30 text-white">
+                          <SelectValue placeholder={versionsLoading ? t("loadingVersions") : t("selectVersion")} />
+                        </SelectTrigger>
+                        <SelectContent className="bg-gray-800 border-gray-700 max-h-[300px]">
+                          <SelectItem value="latest" className="text-white hover:bg-gray-700 focus:bg-gray-700">
+                            <div className="flex items-center gap-2">
+                              <span>latest</span>
+                              {latestRelease && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0 border-emerald-500/50 text-emerald-400">
+                                  {latestRelease}
+                                </Badge>
+                              )}
+                            </div>
+                          </SelectItem>
+                          {mcVersions.map((v) => (
+                            <SelectItem key={v.id} value={v.id} className="text-white hover:bg-gray-700 focus:bg-gray-700">
+                              {v.id}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-400">{t("backupVersionHint")}</p>
                     </div>
                   </div>
                 )}
@@ -356,7 +464,7 @@ export default function Dashboard() {
                   <Button type="button" variant="secondary" onClick={() => setIsDialogOpen(false)} className="bg-gray-700 hover:bg-gray-600">
                     {t("cancel")}
                   </Button>
-                  <Button type="submit" disabled={isCreatingServer || (createMode === "template" && !selectedTemplate)} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <Button type="submit" disabled={isCreatingServer || (createMode === "template" && !selectedTemplate) || (createMode === "backup" && !backupFile)} className="bg-emerald-600 hover:bg-emerald-700 text-white">
                     {isCreatingServer ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />

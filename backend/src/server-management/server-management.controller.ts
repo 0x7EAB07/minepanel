@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, NotFoundException, Put, Query, BadRequestException, ValidationPipe, Delete, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, NotFoundException, Put, Query, BadRequestException, ValidationPipe, Delete, UseGuards, Request, UseInterceptors, UploadedFile, Logger } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { DockerComposeService } from 'src/docker-compose/docker-compose.service';
 import { ServerManagementService } from './server-management.service';
 import { UpdateServerConfigDto } from './dto/server-config.model';
@@ -7,16 +8,29 @@ import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
 import { SettingsService } from 'src/users/services/settings.service';
 import { PayloadToken } from 'src/auth/models/token.model';
 import { ProxyService } from 'src/proxy/proxy.service';
+import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs-extra';
+import * as path from 'node:path';
+import { promisify } from 'node:util';
+import { exec } from 'node:child_process';
+
+const execAsync = promisify(exec);
 
 @Controller('servers')
 @UseGuards(JwtAuthGuard)
 export class ServerManagementController {
+  private readonly logger = new Logger(ServerManagementController.name);
+  private readonly SERVERS_DIR: string;
+
   constructor(
     private readonly dockerComposeService: DockerComposeService,
     private readonly managementService: ServerManagementService,
     private readonly settingsService: SettingsService,
     private readonly proxyService: ProxyService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.SERVERS_DIR = this.configService.get('serversDir');
+  }
 
   @Get()
   async getAllServers(): Promise<ServerListItemDto[]> {
@@ -118,6 +132,114 @@ export class ServerManagementController {
       message: `Regenerated ${result.updated.length} servers`,
       ...result,
     };
+  }
+
+  @Post('create-from-backup')
+  @UseInterceptors(FileInterceptor('file'))
+  async createFromBackup(
+    @Request() req,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { id?: string; edition?: string; minecraftVersion?: string },
+  ) {
+    if (!file) {
+      throw new BadRequestException('No backup file provided');
+    }
+    if (!file.originalname.endsWith('.tar.gz')) {
+      throw new BadRequestException('Only .tar.gz files are accepted');
+    }
+
+    const id = body.id;
+    if (!id) throw new BadRequestException('Server ID is required');
+    if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
+      throw new BadRequestException('Server ID can only contain letters, numbers, hyphens, and underscores');
+    }
+
+    const edition = body.edition || 'JAVA';
+    const minecraftVersion = body.minecraftVersion || (edition === 'BEDROCK' ? 'LATEST' : 'latest');
+
+    // 1. Create the server (generates docker-compose, mc-data dir, etc.)
+    const user = req.user as PayloadToken;
+    const settings = await this.settingsService.getSettings(user.userId);
+    const proxyEnabled = settings.preferences?.proxyEnabled && !!settings.preferences?.proxyBaseDomain;
+
+    const serverConfig = await this.dockerComposeService.createServer(id, { id, edition, minecraftVersion } as any, proxyEnabled);
+
+    // 2. Extract backup to temp dir to inspect type
+    const mcDataPath = path.join(this.SERVERS_DIR, id, 'mc-data');
+    const backupsDir = path.join(this.SERVERS_DIR, id, 'backups');
+    await fs.ensureDir(backupsDir);
+
+    // Save the uploaded backup file
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const backupFilePath = path.join(backupsDir, safeName);
+    await fs.writeFile(backupFilePath, file.buffer);
+
+    const tmpDir = path.join(backupsDir, `.restore-tmp-${Date.now()}`);
+    await fs.ensureDir(tmpDir);
+
+    try {
+      await execAsync(`tar -xzf "${backupFilePath}" -C "${tmpDir}"`);
+
+      const entries = await fs.readdir(tmpDir);
+      const hasServerProperties = entries.includes('server.properties');
+      const worldFolders = entries.filter((e) => e === 'world' || e === 'world_nether' || e === 'world_the_end');
+      const isWorldOnly = worldFolders.length > 0 && !hasServerProperties;
+
+      if (isWorldOnly) {
+        // World-only: start server, wait for it to generate configs, stop, replace world, restart
+        this.logger.log(`World-only backup for new server ${id}. Starting initial boot...`);
+        await this.managementService.startServer(id);
+
+        // Wait for server to create server.properties (up to 60s)
+        const serverPropsPath = path.join(mcDataPath, 'server.properties');
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (await fs.pathExists(serverPropsPath)) {
+            this.logger.log(`Server ${id} finished initial setup after ${(i + 1) * 2}s`);
+            break;
+          }
+        }
+
+        // Stop the server
+        await this.managementService.stopServer(id);
+        // Wait a moment for clean shutdown
+        await new Promise((r) => setTimeout(r, 3000));
+
+        // Replace world folders
+        for (const folder of worldFolders) {
+          const targetPath = path.join(mcDataPath, folder);
+          if (await fs.pathExists(targetPath)) {
+            await fs.remove(targetPath);
+          }
+          await fs.move(path.join(tmpDir, folder), targetPath);
+          this.logger.log(`Restored ${folder} for new server ${id}`);
+        }
+
+        // Restart
+        await this.managementService.startServer(id);
+      } else {
+        // Full backup: extract directly into mc-data
+        this.logger.log(`Full backup for new server ${id}. Extracting to mc-data...`);
+        await fs.emptyDir(mcDataPath);
+        for (const entry of entries) {
+          await fs.move(path.join(tmpDir, entry), path.join(mcDataPath, entry));
+        }
+        // Start the server
+        await this.managementService.startServer(id);
+      }
+
+      return {
+        success: true,
+        message: `Server "${id}" created from backup successfully`,
+        server: serverConfig,
+        backupType: isWorldOnly ? 'world-only' : 'full',
+      };
+    } catch (error) {
+      this.logger.error(`Failed to create server ${id} from backup`, error);
+      throw new BadRequestException(`Failed to create server from backup: ${(error as Error).message}`);
+    } finally {
+      await fs.remove(tmpDir).catch(() => {});
+    }
   }
 
   @Delete(':id')

@@ -1227,6 +1227,11 @@ export const en = {
   chooseCreationMethod: 'Choose how you want to create your server',
   quickCreate: 'Quick Create',
   fromTemplate: 'From Template',
+  fromBackup: 'From Backup',
+  fromBackupDesc: 'Create a new server from an existing backup file. Supports full server backups and world-only backups.',
+  backupUploadDropzone: 'Click to select a backup file',
+  backupUploadFormats: '.tar.gz files (full backup or world only)',
+  backupVersionHint: 'e.g. 1.21.4, 1.20.1, or "latest" for newest',
   selectTemplate: 'Select a template to get started quickly',
   quickCreateDesc:
     'Create an empty server with default settings. You can configure everything later.',
@@ -1338,6 +1343,10 @@ export const en = {
   backupRestoreConfirmDesc: 'This will stop the server, replace the current world data with this backup, and restart the server. This action cannot be undone.',
   backupDeleteConfirmTitle: 'Delete Backup?',
   backupDeleteConfirmDesc: 'This backup file will be permanently deleted. This action cannot be undone.',
+  backupUpload: 'Upload',
+  backupUploaded: 'Backup uploaded successfully',
+  backupUploadError: 'Failed to upload backup',
+  backupUploadInvalidFile: 'Only .tar.gz backup files are accepted',
 
   // BEDROCK TEMPLATES
   bedrockSurvival: 'Bedrock Survival',

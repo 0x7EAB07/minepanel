@@ -38,6 +38,7 @@ export const ServerConfigTabs: FC<ServerConfigTabsProps> = ({ serverId, config, 
   const showPluginsTab = isJava && (config.serverType === "SPIGOT" || config.serverType === "PAPER" || config.serverType === "BUKKIT" || config.serverType === "PUFFERFISH" || config.serverType === "PURPUR" || config.serverType === "LEAF" || config.serverType === "FOLIA");
   const showResourcesTab = isJava; // JVM settings only apply to Java
   const showCommandsTab = isJava; // RCON only works with Java
+  const showBackupsTab = config.enableBackup === true;
 
   const getInitialTab = () => {
     if (typeof window === "undefined") return "type";
@@ -197,10 +198,12 @@ export const ServerConfigTabs: FC<ServerConfigTabsProps> = ({ serverId, config, 
                     <span className="hidden md:inline">{t("files")}</span>
                   </TabsTrigger>
 
+                  {showBackupsTab && (
                   <TabsTrigger value="backups" className="flex text-gray-200 items-center gap-1 py-2 px-2 md:px-3 data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-400 data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 font-minecraft text-xs md:text-sm whitespace-nowrap">
                     <Archive className="h-4 w-4 shrink-0" />
                     <span className="hidden md:inline">{t("backups")}</span>
                   </TabsTrigger>
+                  )}
                 </TabsList>
               </div>
               <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-8 bg-linear-to-r from-gray-800/70 to-transparent"></div>
@@ -258,9 +261,11 @@ export const ServerConfigTabs: FC<ServerConfigTabsProps> = ({ serverId, config, 
                 <FilesTab serverId={serverId} />
               </TabsContent>
 
+              {showBackupsTab && (
               <TabsContent value="backups" className="space-y-4 mt-0">
                 <BackupsTab serverId={serverId} serverStatus={serverStatus} />
               </TabsContent>
+              )}
             </div>
           </Tabs>
         </form>

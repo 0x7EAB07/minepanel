@@ -1,4 +1,4 @@
-import { FC, useCallback, useEffect, useState } from "react";
+import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useLanguage } from "@/lib/hooks/useLanguage";
 import { mcToast } from "@/lib/utils/minecraft-toast";
-import { BackupFile, listBackups, triggerBackup, restoreBackup, deleteBackup, downloadBackup } from "@/services/docker/backups";
-import { Archive, Download, RotateCcw, Trash2, Plus, Loader2, RefreshCw } from "lucide-react";
+import { BackupFile, listBackups, triggerBackup, restoreBackup, deleteBackup, downloadBackup, uploadBackup } from "@/services/docker/backups";
+import { Archive, Download, RotateCcw, Trash2, Plus, Loader2, RefreshCw, Upload } from "lucide-react";
 
 interface BackupsTabProps {
   serverId: string;
@@ -48,6 +48,8 @@ export const BackupsTab: FC<BackupsTabProps> = ({ serverId, serverStatus }) => {
   const [triggering, setTriggering] = useState(false);
   const [restoringFile, setRestoringFile] = useState<string | null>(null);
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchBackups = useCallback(async () => {
     try {
@@ -92,11 +94,10 @@ export const BackupsTab: FC<BackupsTabProps> = ({ serverId, serverStatus }) => {
 
   const handleDownload = (filename: string) => {
     const url = downloadBackup(serverId, filename);
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
     
-    // Use fetch with auth header since the endpoint requires JWT
+    // Use fetch with credentials to send auth cookies
     fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: "include",
     })
       .then((res) => {
         if (!res.ok) throw new Error("Download failed");
@@ -127,6 +128,28 @@ export const BackupsTab: FC<BackupsTabProps> = ({ serverId, serverStatus }) => {
     }
   };
 
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith(".tar.gz")) {
+      mcToast.error(t("backupUploadInvalidFile"));
+      return;
+    }
+
+    try {
+      setUploading(true);
+      await uploadBackup(serverId, file);
+      mcToast.success(t("backupUploaded"));
+      await fetchBackups();
+    } catch (err) {
+      mcToast.error(t("backupUploadError"));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   return (
     <Card className="bg-gray-900/60 border-gray-700/50 shadow-lg">
       <CardHeader className="pb-3">
@@ -148,6 +171,27 @@ export const BackupsTab: FC<BackupsTabProps> = ({ serverId, serverStatus }) => {
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              size="sm"
+              variant="outline"
+              className="border-gray-600 hover:bg-gray-800 text-gray-300 bg-transparent"
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+              ) : (
+                <Upload className="h-4 w-4 mr-1" />
+              )}
+              {t("backupUpload")}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".tar.gz,.gz"
+              onChange={handleUpload}
+              className="hidden"
+            />
             <Button
               onClick={handleTriggerBackup}
               disabled={triggering || serverStatus !== "running"}

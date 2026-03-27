@@ -1242,6 +1242,11 @@ export const es: Record<TranslationKey, string> = {
   chooseCreationMethod: 'Elige cómo quieres crear tu servidor',
   quickCreate: 'Creación Rápida',
   fromTemplate: 'Desde Plantilla',
+  fromBackup: 'Desde Backup',
+  fromBackupDesc: 'Crea un nuevo servidor desde un archivo de copia de seguridad. Soporta copias completas y solo mundo.',
+  backupUploadDropzone: 'Haz clic para seleccionar un archivo de backup',
+  backupUploadFormats: 'Archivos .tar.gz (backup completo o solo mundo)',
+  backupVersionHint: 'ej. 1.21.4, 1.20.1, o "latest" para la más reciente',
   selectTemplate: 'Selecciona una plantilla para comenzar rápidamente',
   quickCreateDesc:
     'Crea un servidor vacío con configuración por defecto. Puedes configurar todo después.',
@@ -1360,6 +1365,10 @@ export const es: Record<TranslationKey, string> = {
   backupRestoreConfirmDesc: 'Esto detendrá el servidor, reemplazará los datos del mundo con esta copia y reiniciará el servidor. Esta acción no se puede deshacer.',
   backupDeleteConfirmTitle: '¿Eliminar copia?',
   backupDeleteConfirmDesc: 'Esta copia de seguridad se eliminará permanentemente. Esta acción no se puede deshacer.',
+  backupUpload: 'Subir',
+  backupUploaded: 'Copia de seguridad subida correctamente',
+  backupUploadError: 'Error al subir la copia de seguridad',
+  backupUploadInvalidFile: 'Solo se aceptan archivos .tar.gz',
 
   bedrockSurvival: 'Bedrock Supervivencia',
   bedrockSurvivalDesc: 'Supervivencia clásica para jugadores móviles y de consola.',
@@ -1367,4 +1376,5 @@ export const es: Record<TranslationKey, string> = {
   bedrockCreativeDesc: 'Modo creativo con trucos habilitados para todos.',
   bedrockFamily: 'Bedrock Familiar',
   bedrockFamilyDesc: 'Servidor LAN privado para juego familiar con lista blanca.',
+
 };

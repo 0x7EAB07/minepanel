@@ -138,6 +138,19 @@ export const getServerLogsSince = async (
   return data;
 };
 
+export const createServerFromBackup = async (id: string, edition: string, file: File, version?: string): Promise<{ success: boolean; message: string; backupType?: string }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('id', id);
+  formData.append('edition', edition);
+  if (version) formData.append('minecraftVersion', version);
+  const response = await api.post('/servers/create-from-backup', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000, // 2min timeout for world-only backups (start/wait/stop/replace/restart)
+  });
+  return response.data;
+};
+
 export const deleteServer = async (serverId: string): Promise<{ success: boolean; message: string }> => {
   const response = await api.delete(`/servers/${serverId}`);
   return response.data;

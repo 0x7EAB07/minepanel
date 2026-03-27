@@ -127,17 +127,51 @@ export class BackupService {
       await execAsync('docker compose down', execOptions);
     }
 
-    // Step 2: Clear mc-data contents
-    this.logger.log(`Clearing mc-data for server ${serverId}...`);
-    if (await fs.pathExists(mcDataPath)) {
-      await fs.emptyDir(mcDataPath);
-    } else {
-      await fs.ensureDir(mcDataPath);
-    }
+    // Step 2: Extract to temp dir to inspect contents
+    const tmpDir = path.join(backupsDir, `.restore-tmp-${Date.now()}`);
+    await fs.ensureDir(tmpDir);
 
-    // Step 3: Extract backup into mc-data
-    this.logger.log(`Extracting backup ${filename} for server ${serverId}...`);
-    await execAsync(`tar -xzf "${backupFilePath}" -C "${mcDataPath}"`);
+    try {
+      this.logger.log(`Extracting backup ${filename} to temp dir for inspection...`);
+      await execAsync(`tar -xzf "${backupFilePath}" -C "${tmpDir}"`);
+
+      // Determine backup type by checking contents
+      const entries = await fs.readdir(tmpDir);
+      const hasServerProperties = entries.includes('server.properties');
+      const worldFolders = entries.filter((e) => e === 'world' || e === 'world_nether' || e === 'world_the_end');
+      const isWorldOnly = worldFolders.length > 0 && !hasServerProperties;
+
+      if (isWorldOnly) {
+        // World-only backup: only replace world folders, preserve everything else
+        this.logger.log(`Detected world-only backup for ${serverId}, replacing world folders only...`);
+        await fs.ensureDir(mcDataPath);
+
+        for (const folder of worldFolders) {
+          const targetPath = path.join(mcDataPath, folder);
+          const sourcePath = path.join(tmpDir, folder);
+          if (await fs.pathExists(targetPath)) {
+            await fs.remove(targetPath);
+          }
+          await fs.move(sourcePath, targetPath);
+          this.logger.log(`Restored ${folder} for server ${serverId}`);
+        }
+      } else {
+        // Full backup: replace entire mc-data
+        this.logger.log(`Detected full backup for ${serverId}, replacing all mc-data...`);
+        if (await fs.pathExists(mcDataPath)) {
+          await fs.emptyDir(mcDataPath);
+        } else {
+          await fs.ensureDir(mcDataPath);
+        }
+
+        for (const entry of entries) {
+          await fs.move(path.join(tmpDir, entry), path.join(mcDataPath, entry));
+        }
+      }
+    } finally {
+      // Clean up temp dir
+      await fs.remove(tmpDir).catch(() => {});
+    }
 
     // Step 4: Start the MC server
     this.logger.log(`Starting server ${serverId} after restore...`);
@@ -160,6 +194,29 @@ export class BackupService {
     }
 
     return filePath;
+  }
+
+  async saveUploadedBackup(serverId: string, file: { originalname: string; buffer: Buffer }): Promise<{ filename: string }> {
+    if (!this.validateServerId(serverId)) {
+      throw new BadRequestException('Invalid server ID');
+    }
+
+    const backupsDir = this.getBackupsDir(serverId);
+    await fs.ensureDir(backupsDir);
+
+    // Sanitize filename: keep only safe chars
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = path.join(backupsDir, safeName);
+
+    // Don't overwrite existing backups
+    if (await fs.pathExists(filePath)) {
+      throw new BadRequestException(`Backup "${safeName}" already exists`);
+    }
+
+    await fs.writeFile(filePath, file.buffer);
+    this.logger.log(`Uploaded backup ${safeName} for server ${serverId} (${file.buffer.length} bytes)`);
+
+    return { filename: safeName };
   }
 
   async deleteBackup(serverId: string, filename: string): Promise<void> {

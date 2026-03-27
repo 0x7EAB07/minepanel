@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Delete, Param, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Res, UseGuards, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import * as fs from 'fs-extra';
 import { JwtAuthGuard } from 'src/auth/guards/auth.guard';
@@ -42,6 +43,22 @@ export class BackupController {
       }
     });
     stream.pipe(res);
+  }
+
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadBackup(
+    @Param('serverId') serverId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file provided');
+    }
+    if (!file.originalname.endsWith('.tar.gz')) {
+      throw new BadRequestException('Only .tar.gz files are accepted');
+    }
+    const saved = await this.backupService.saveUploadedBackup(serverId, file);
+    return { success: true, message: 'Backup uploaded successfully', filename: saved.filename };
   }
 
   @Delete(':filename')

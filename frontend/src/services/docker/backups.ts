@@ -26,6 +26,15 @@ export const downloadBackup = (serverId: string, filename: string): string => {
   return `${baseUrl}/servers/${serverId}/backups/${encodeURIComponent(filename)}/download`;
 };
 
+export const uploadBackup = async (serverId: string, file: File): Promise<{ success: boolean; message: string; filename: string }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post(`/servers/${serverId}/backups/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+};
+
 export const deleteBackup = async (serverId: string, filename: string): Promise<{ success: boolean; message: string }> => {
   const response = await api.delete(`/servers/${serverId}/backups/${encodeURIComponent(filename)}`);
   return response.data;
